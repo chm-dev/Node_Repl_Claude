@@ -21,10 +21,28 @@ function initializeMonacoEditor() {
         
         // Create editor
         editor = monaco.editor.create(document.getElementById('editor'), {
-            value: `// Enhanced JS REPL - Now logs function returns!
+            value: `// Enhanced JS REPL - Now with Node.js modules support!
 // Press Ctrl+Enter to run code
 
 console.log('Testing console log');
+
+// Test Node.js modules
+try {
+  const os = require("os");
+  const path = require("path");
+
+  console.log("Platform:", os.platform());
+  console.log("Node version:", process.version);
+  console.log("Home directory:", os.homedir());
+  console.log("Path join:", path.join("/users", "documents", "file.txt"));
+} catch (error) {
+  console.log("Node.js modules not available - running in browser mode");
+  console.log("Available mock modules: os, path, crypto");
+
+  // Try the mock modules
+  const os = require("os");
+  console.log("Mock platform:", os.platform());
+}
 
 // Function declaration with return
 function add(a, b) {

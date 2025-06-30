@@ -141,6 +141,135 @@ ipcMain.handle('execute-code', async (event, code) => {
       }
     };
 
+    // Create Node.js module mocks for browser-like environment
+    const createNodeModules = () => {
+      const nodeModules = {};
+      
+      // Mock OS module
+      nodeModules.os = {
+        platform: () => process.platform,
+        arch: () => process.arch,
+        cpus: () => require('os').cpus(),
+        totalmem: () => require('os').totalmem(),
+        freemem: () => require('os').freemem(),
+        homedir: () => require('os').homedir(),
+        hostname: () => require('os').hostname(),
+        type: () => require('os').type(),
+        release: () => require('os').release(),
+        uptime: () => require('os').uptime(),
+        loadavg: () => require('os').loadavg(),
+        networkInterfaces: () => require('os').networkInterfaces(),
+        userInfo: () => require('os').userInfo(),
+        tmpdir: () => require('os').tmpdir(),
+        endianness: () => require('os').endianness(),
+        EOL: require('os').EOL
+      };
+      
+      // Mock PATH module
+      nodeModules.path = {
+        join: (...args) => require('path').join(...args),
+        resolve: (...args) => require('path').resolve(...args),
+        relative: (from, to) => require('path').relative(from, to),
+        dirname: (p) => require('path').dirname(p),
+        basename: (p, ext) => require('path').basename(p, ext),
+        extname: (p) => require('path').extname(p),
+        parse: (p) => require('path').parse(p),
+        format: (obj) => require('path').format(obj),
+        normalize: (p) => require('path').normalize(p),
+        isAbsolute: (p) => require('path').isAbsolute(p),
+        sep: require('path').sep,
+        delimiter: require('path').delimiter,
+        posix: require('path').posix,
+        win32: require('path').win32
+      };
+      
+      // Mock CRYPTO module
+      nodeModules.crypto = {
+        randomBytes: (size) => require('crypto').randomBytes(size),
+        randomUUID: () => require('crypto').randomUUID(),
+        createHash: (algorithm) => require('crypto').createHash(algorithm),
+        createHmac: (algorithm, key) => require('crypto').createHmac(algorithm, key),
+        pbkdf2Sync: (password, salt, iterations, keylen, digest) => 
+          require('crypto').pbkdf2Sync(password, salt, iterations, keylen, digest),
+        scryptSync: (password, salt, keylen, options) => 
+          require('crypto').scryptSync(password, salt, keylen, options),
+        timingSafeEqual: (a, b) => require('crypto').timingSafeEqual(a, b)
+      };
+      
+      // Mock FS module (limited safe operations)
+      nodeModules.fs = {
+        existsSync: (path) => {
+          try {
+            return require('fs').existsSync(path);
+          } catch (error) {
+            return false;
+          }
+        },
+        statSync: (path) => {
+          try {
+            return require('fs').statSync(path);
+          } catch (error) {
+            throw new Error('File not found or access denied');
+          }
+        },
+        constants: require('fs').constants
+      };
+      
+      // Mock UTIL module
+      nodeModules.util = {
+        format: (...args) => require('util').format(...args),
+        inspect: (obj, options) => require('util').inspect(obj, options),
+        isArray: Array.isArray,
+        isDate: (obj) => obj instanceof Date,
+        isError: (obj) => obj instanceof Error,
+        isFunction: (obj) => typeof obj === 'function',
+        isNull: (obj) => obj === null,
+        isUndefined: (obj) => obj === undefined,
+        types: require('util').types
+      };
+      
+      return nodeModules;
+    };
+
+    // Create require function for Node modules
+    const createRequire = (nodeModules) => {
+      return (moduleName) => {
+        // Try to get real Node.js module first
+        try {
+          switch (moduleName) {
+            case 'os':
+              return require('os');
+            case 'path':
+              return require('path');
+            case 'crypto':
+              return require('crypto');
+            case 'util':
+              return require('util');
+            case 'fs':
+              return require('fs');
+            case 'url':
+              return require('url');
+            case 'querystring':
+              return require('querystring');
+            default:
+              // For unknown modules, throw an error like Node.js would
+              throw new Error(`Cannot find module '${moduleName}'`);
+          }
+        } catch (error) {
+          // If real module fails, try mock version
+          if (nodeModules[moduleName]) {
+            return nodeModules[moduleName];
+          }
+          // If no mock available, re-throw the error
+          throw error;
+        }
+      };
+    };
+
+    // Create Node modules and require function
+    const nodeModules = createNodeModules();
+    const requireFunction = createRequire(nodeModules);
+
     // Create a new context for code execution
     const sandbox = {
       console: {
@@ -173,6 +302,22 @@ ipcMain.handle('execute-code', async (event, code) => {
       TypeError,
       ReferenceError,
       SyntaxError,
+      // Add Node.js globals
+      process: {
+        version: process.version,
+        versions: process.versions,
+        platform: process.platform,
+        arch: process.arch,
+        env: { NODE_ENV: 'development' }, // Limited env access
+        argv: process.argv,
+        pid: process.pid,
+        uptime: () => process.uptime(),
+        hrtime: process.hrtime,
+        nextTick: process.nextTick
+      },
+      Buffer: Buffer,
+      global: {},
+      require: requireFunction,
       // Add some utility functions
       fetch: require('node-fetch') // For async operations
     };
@@ -181,11 +326,6 @@ ipcMain.handle('execute-code', async (event, code) => {
     const instrumentCode = (code) => {
       const lines = code.split('\n');
       const instrumentedLines = [];
-      
-      // Track open/close brackets to properly detect multi-line statements
-      let parenDepth = 0;
-      let braceDepth = 0;
-      let bracketDepth = 0;
       
       for (let i = 0; i < lines.length; i++) {
         const lineNum = i + 1;
@@ -198,41 +338,14 @@ ipcMain.handle('execute-code', async (event, code) => {
           continue;
         }
         
-        // Count brackets on this line to update depth
-        for (let char of line) {
-          if (char === '(') parenDepth++;
-          else if (char === ')') parenDepth--;
-          else if (char === '{') braceDepth++;
-          else if (char === '}') braceDepth--;
-          else if (char === '[') bracketDepth++;
-          else if (char === ']') bracketDepth--;
-        }
-        
-        // Check if we're in the middle of a multi-line statement
-        // We need to check the depth BEFORE processing this line
-        let wasInMultiLine = false;
-        let tempParenDepth = 0;
-        let tempBraceDepth = 0;
-        let tempBracketDepth = 0;
-        
-        // Calculate what the depth was before this line
-        for (let j = 0; j < i; j++) {
-          for (let char of lines[j]) {
-            if (char === '(') tempParenDepth++;
-            else if (char === ')') tempParenDepth--;
-            else if (char === '{') tempBraceDepth++;
-            else if (char === '}') tempBraceDepth--;
-            else if (char === '[') tempBracketDepth++;
-            else if (char === ']') tempBracketDepth--;
-          }
-        }
-        
-        wasInMultiLine = tempParenDepth > 0 || tempBraceDepth > 0 || tempBracketDepth > 0;
-        
         let processedLine = line;
         
-        // Only process lines that are not continuation lines
-        if (!wasInMultiLine) {
+        // Check if this line contains a statement that should be instrumented
+        // Don't instrument control flow keywords or block delimiters
+        const isControlFlow = trimmedLine.match(/^(try|catch|finally|if|else|for|while|do|switch|case|default|function|class|\}|\{)/) ||
+                             trimmedLine === '}' || trimmedLine === '{';
+        
+        if (!isControlFlow) {
           // Handle return statements
           if (trimmedLine.startsWith('return ') && trimmedLine !== 'return;') {
             const match = line.match(/^(\s*)return\s+([^;\/]+);?\s*(\/\/.*)?$/);
@@ -259,18 +372,26 @@ ipcMain.handle('execute-code', async (event, code) => {
               const expr = match[4].trim();
               const comment = match[5] || '';
               
-              // Check if expression contains await
-              if (expr.includes('await ')) {
-                if (varType) {
-                  processedLine = `${indent}const ${varName} = await (async () => { const __r = (${expr}); __logReturn('${varName}', __r, ${lineNum}); return __r; })(); ${comment}`;
-                } else {
-                  processedLine = `${indent}${varName} = await (async () => { const __r = (${expr}); __logReturn('${varName}', __r, ${lineNum}); return __r; })(); ${comment}`;
-                }
+              // Skip logging for require statements as they output huge objects
+              const isRequireStatement = expr.match(/^require\s*\(/);
+              
+              if (isRequireStatement) {
+                // Don't instrument require statements - just pass them through
+                processedLine = line;
               } else {
-                if (varType) {
-                  processedLine = `${indent}${varType} ${varName} = (() => { const __r = (${expr}); __logReturn('${varName}', __r, ${lineNum}); return __r; })(); ${comment}`;
+                // Check if expression contains await
+                if (expr.includes('await ')) {
+                  if (varType) {
+                    processedLine = `${indent}const ${varName} = await (async () => { const __r = (${expr}); __logReturn('${varName}', __r, ${lineNum}); return __r; })(); ${comment}`;
+                  } else {
+                    processedLine = `${indent}${varName} = await (async () => { const __r = (${expr}); __logReturn('${varName}', __r, ${lineNum}); return __r; })(); ${comment}`;
+                  }
                 } else {
-                  processedLine = `${indent}${varName} = (() => { const __r = (${expr}); __logReturn('${varName}', __r, ${lineNum}); return __r; })(); ${comment}`;
+                  if (varType) {
+                    processedLine = `${indent}${varType} ${varName} = (() => { const __r = (${expr}); __logReturn('${varName}', __r, ${lineNum}); return __r; })(); ${comment}`;
+                  } else {
+                    processedLine = `${indent}${varName} = (() => { const __r = (${expr}); __logReturn('${varName}', __r, ${lineNum}); return __r; })(); ${comment}`;
+                  }
                 }
               }
             }
@@ -286,19 +407,27 @@ ipcMain.handle('execute-code', async (event, code) => {
               const expr = match[2].trim();
               const comment = match[3] || '';
               
-              // Check if expression contains await
-              if (expr.includes('await ')) {
-                processedLine = `${indent}await (async () => { const __r = (${expr}); __logReturn('expression', __r, ${lineNum}); return __r; })(); ${comment}`;
+              // Skip logging for standalone require statements
+              const isRequireStatement = expr.match(/^require\s*\(/);
+              
+              if (isRequireStatement) {
+                // Don't instrument require statements - just pass them through
+                processedLine = line;
               } else {
-                processedLine = `${indent}(() => { const __r = (${expr}); __logReturn('expression', __r, ${lineNum}); return __r; })(); ${comment}`;
+                // Check if expression contains await
+                if (expr.includes('await ')) {
+                  processedLine = `${indent}await (async () => { const __r = (${expr}); __logReturn('expression', __r, ${lineNum}); return __r; })(); ${comment}`;
+                } else {
+                  processedLine = `${indent}(() => { const __r = (${expr}); __logReturn('expression', __r, ${lineNum}); return __r; })(); ${comment}`;
+                }
               }
             }
           }
           
-          // Add line tracking only to statement start lines
+          // Add line tracking to statement lines
           instrumentedLines.push(`__setLine(${lineNum}); ${processedLine}`);
         } else {
-          // For continuation lines, just add the line without instrumentation
+          // For control flow lines (try, catch, if, etc.), just add the line without instrumentation
           instrumentedLines.push(processedLine);
         }
       }
