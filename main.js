@@ -202,19 +202,39 @@ ipcMain.handle('execute-code', async (event, code) => {
             const indent = match[1];
             const expr = match[2].trim();
             const comment = match[3] || '';
-            processedLine = `${indent}return (() => { const __rv = (${expr}); __logReturn('return', __rv, ${lineNum}); return __rv; })(); ${comment}`;
+            
+            // Check if expression contains await
+            if (expr.includes('await ')) {
+              processedLine = `${indent}return await (async () => { const __rv = (${expr}); __logReturn('return', __rv, ${lineNum}); return __rv; })(); ${comment}`;
+            } else {
+              processedLine = `${indent}return (() => { const __rv = (${expr}); __logReturn('return', __rv, ${lineNum}); return __rv; })(); ${comment}`;
+            }
           }
         }
         // Handle variable assignments with function calls: const x = func();
-        else if (trimmedLine.match(/^(const|let|var)\s+\w+\s*=\s*\w+.*\(/)) {
-          const match = line.match(/^(\s*)(const|let|var)\s+(\w+)\s*=\s*([^;\/]+);?\s*(\/\/.*)?$/);
+        else if (trimmedLine.match(/^(const|let|var)\s+\w+\s*=\s*/) || trimmedLine.match(/^\w+\s*=\s*/)) {
+          const match = line.match(/^(\s*)(?:(const|let|var)\s+)?(\w+)\s*=\s*([^;\/]+);?\s*(\/\/.*)?$/);
           if (match) {
             const indent = match[1];
-            const varType = match[2];
+            const varType = match[2] || ''; // might be empty for reassignments
             const varName = match[3];
             const expr = match[4].trim();
             const comment = match[5] || '';
-            processedLine = `${indent}${varType} ${varName} = (() => { const __r = (${expr}); __logReturn('${varName}', __r, ${lineNum}); return __r; })(); ${comment}`;
+            
+            // Check if expression contains await
+            if (expr.includes('await ')) {
+              if (varType) {
+                processedLine = `${indent}const ${varName} = await (async () => { const __r = (${expr}); __logReturn('${varName}', __r, ${lineNum}); return __r; })(); ${comment}`;
+              } else {
+                processedLine = `${indent}${varName} = await (async () => { const __r = (${expr}); __logReturn('${varName}', __r, ${lineNum}); return __r; })(); ${comment}`;
+              }
+            } else {
+              if (varType) {
+                processedLine = `${indent}${varType} ${varName} = (() => { const __r = (${expr}); __logReturn('${varName}', __r, ${lineNum}); return __r; })(); ${comment}`;
+              } else {
+                processedLine = `${indent}${varName} = (() => { const __r = (${expr}); __logReturn('${varName}', __r, ${lineNum}); return __r; })(); ${comment}`;
+              }
+            }
           }
         }
         // Handle standalone function calls (like Math.max, "str".method(), etc.)
@@ -227,7 +247,13 @@ ipcMain.handle('execute-code', async (event, code) => {
             const indent = match[1];
             const expr = match[2].trim();
             const comment = match[3] || '';
-            processedLine = `${indent}(() => { const __r = (${expr}); __logReturn('expression', __r, ${lineNum}); return __r; })(); ${comment}`;
+            
+            // Check if expression contains await
+            if (expr.includes('await ')) {
+              processedLine = `${indent}await (async () => { const __r = (${expr}); __logReturn('expression', __r, ${lineNum}); return __r; })(); ${comment}`;
+            } else {
+              processedLine = `${indent}(() => { const __r = (${expr}); __logReturn('expression', __r, ${lineNum}); return __r; })(); ${comment}`;
+            }
           }
         }
         
