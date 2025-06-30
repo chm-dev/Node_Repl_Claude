@@ -21,37 +21,25 @@ function initializeMonacoEditor() {
         
         // Create editor
         editor = monaco.editor.create(document.getElementById('editor'), {
-            value: `// Welcome to JS REPL - JavaScript Playground with Line Tracking!
-// Press Ctrl+Enter to run code, or click the Run button
-// Console logs and function returns will show line numbers
-// Click on any output item to jump to the corresponding line!
+            value: `// Enhanced JS REPL - Now logs function returns!
+// Press Ctrl+Enter to run code
 
-console.log('Hello from line 5!');
+console.log('Testing console log');
 
-// Try some examples:
-const greet = (name) => {
-    console.log(\`Hello, \${name}! (from line 10)\`);
-    return \`Greeting sent to \${name}\`;
-};
-
-const result = greet('Developer');
-console.log('Function returned:', result);
-
-// Multiple console logs to test line tracking:
-console.log('This is line 17');
-console.warn('This is a warning from line 18');
-console.error('This is an error from line 19');
-
-// Async functions work too:
-async function fetchData() {
-    console.log('Starting async operation... (line 23)');
-    await new Promise(resolve => setTimeout(resolve, 1000));
-    console.log('Async operation completed! (line 25)');
-    return { data: 'Sample data', timestamp: new Date() };
+// Function declaration with return
+function add(a, b) {
+    console.log('Adding numbers...');
+    return a + b;  // This return will be logged!
 }
 
-// Uncomment to test async:
-// fetchData();`,
+// Call the function and assign result
+const result = add(5, 3);
+
+// Simple expression that returns a value
+Math.max(10, 20, 15);
+
+// String manipulation
+"Hello World".toUpperCase();`,
             language: 'javascript',
             theme: 'vs-dark',
             fontSize: 14,
@@ -111,7 +99,11 @@ function setupEventListeners() {
 function setupIPCListeners() {
     // Console output listener
     window.electronAPI.onConsoleOutput((event, data) => {
-        addOutputItem(data.type, data.args.join(' '), 'console', null, data.lineNumber);
+        if (data.type === 'function-return') {
+            addOutputItem(data.type, data.args.join(' '), 'console', null, data.lineNumber, data.functionName);
+        } else {
+            addOutputItem(data.type, data.args.join(' '), 'console', null, data.lineNumber);
+        }
     });
 
     // Menu event listeners
@@ -155,9 +147,9 @@ async function executeCode() {
 }
 
 // Add output item
-function addOutputItem(type, content, source, stack = null, lineNumber = null) {
+function addOutputItem(type, content, source, stack = null, lineNumber = null, functionName = null) {
     const outputItem = document.createElement('div');
-    outputItem.className = `output-item ${type === 'result' ? 'result' : type.startsWith('console') ? type : 'error'}`;
+    outputItem.className = `output-item ${type === 'result' ? 'result' : type === 'function-return' ? 'function-return' : type.startsWith('console') ? type : 'error'}`;
 
     const header = document.createElement('div');
     header.className = 'output-header';
@@ -165,9 +157,10 @@ function addOutputItem(type, content, source, stack = null, lineNumber = null) {
     const timestamp = new Date().toLocaleTimeString();
     const executionId = source === 'execution' ? `#${executionCounter}` : '';
     const lineInfo = lineNumber ? `<span class="line-number">Line ${lineNumber}</span>` : '';
+    const funcInfo = functionName ? `<span class="function-name">${functionName}()</span>` : '';
     
     header.innerHTML = `
-        <span>${getOutputIcon(type)} ${getOutputLabel(type)} ${executionId} ${lineInfo}</span>
+        <span>${getOutputIcon(type)} ${getOutputLabel(type)} ${executionId} ${funcInfo} ${lineInfo}</span>
         <span class="output-type">${timestamp}</span>
     `;
 
@@ -253,7 +246,8 @@ function getOutputIcon(type) {
         'console-log': 'ℹ',
         'console-warn': '⚠',
         'console-error': '✗',
-        'console-info': 'ℹ'
+        'console-info': 'ℹ',
+        'function-return': '↩'
     };
     return icons[type] || 'ℹ';
 }
@@ -269,7 +263,8 @@ function getOutputLabel(type) {
         'console-log': 'Console Log',
         'console-warn': 'Console Warn',
         'console-error': 'Console Error',
-        'console-info': 'Console Info'
+        'console-info': 'Console Info',
+        'function-return': 'Return'
     };
     return labels[type] || 'Output';
 }

@@ -211,6 +211,11 @@ body {
     border-left-color: #00bcd4;
 }
 
+.output-item.function-return {
+    background: #1e0e2f;
+    border-left-color: #9c27b0;
+}
+
 .output-header {
     font-size: 12px;
     color: #8c8c8c;
@@ -224,6 +229,13 @@ body {
     color: #569cd6;
     font-weight: 500;
     margin-left: 8px;
+}
+
+.output-header .function-name {
+    color: #dcdcaa;
+    font-weight: 500;
+    margin-left: 8px;
+    font-family: 'Consolas', 'Monaco', monospace;
 }
 
 .output-content {

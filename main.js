@@ -129,6 +129,18 @@ ipcMain.handle('execute-code', async (event, code) => {
       currentLineNumber = lineNum;
     };
 
+    // Function to log function returns
+    const logFunctionReturn = (functionName, returnValue, lineNumber) => {
+      if (returnValue !== undefined) {
+        event.sender.send('console-output', {
+          type: 'function-return',
+          args: [typeof returnValue === 'object' ? JSON.stringify(returnValue, null, 2) : String(returnValue)],
+          lineNumber: lineNumber,
+          functionName: functionName
+        });
+      }
+    };
+
     // Create a new context for code execution
     const sandbox = {
       console: {
@@ -138,6 +150,7 @@ ipcMain.handle('execute-code', async (event, code) => {
         info: createConsoleMethod('info')
       },
       __setLine: setCurrentLine, // Internal line tracking function
+      __logReturn: logFunctionReturn, // Internal function return logging
       setTimeout: (callback, delay) => setTimeout(callback, Math.min(delay, 5000)), // Max 5 second timeout
       setInterval: (callback, delay) => setInterval(callback, Math.max(delay, 100)), // Min 100ms interval
       clearTimeout,
@@ -171,14 +184,54 @@ ipcMain.handle('execute-code', async (event, code) => {
       
       for (let i = 0; i < lines.length; i++) {
         const lineNum = i + 1;
-        const line = lines[i].trim();
+        const line = lines[i];
+        const trimmedLine = line.trim();
         
         // Skip empty lines and comments
-        if (line && !line.startsWith('//') && !line.startsWith('/*')) {
-          instrumentedLines.push(`__setLine(${lineNum}); ${lines[i]}`);
-        } else {
-          instrumentedLines.push(lines[i]);
+        if (!trimmedLine || trimmedLine.startsWith('//') || trimmedLine.startsWith('/*')) {
+          instrumentedLines.push(line);
+          continue;
         }
+        
+        let processedLine = line;
+        
+        // Handle return statements
+        if (trimmedLine.startsWith('return ') && trimmedLine !== 'return;') {
+          const match = line.match(/^(\s*)return\s+([^;\/]+);?\s*(\/\/.*)?$/);
+          if (match) {
+            const indent = match[1];
+            const expr = match[2].trim();
+            const comment = match[3] || '';
+            processedLine = `${indent}return (() => { const __rv = (${expr}); __logReturn('return', __rv, ${lineNum}); return __rv; })(); ${comment}`;
+          }
+        }
+        // Handle variable assignments with function calls: const x = func();
+        else if (trimmedLine.match(/^(const|let|var)\s+\w+\s*=\s*\w+.*\(/)) {
+          const match = line.match(/^(\s*)(const|let|var)\s+(\w+)\s*=\s*([^;\/]+);?\s*(\/\/.*)?$/);
+          if (match) {
+            const indent = match[1];
+            const varType = match[2];
+            const varName = match[3];
+            const expr = match[4].trim();
+            const comment = match[5] || '';
+            processedLine = `${indent}${varType} ${varName} = (() => { const __r = (${expr}); __logReturn('${varName}', __r, ${lineNum}); return __r; })(); ${comment}`;
+          }
+        }
+        // Handle standalone function calls (like Math.max, "str".method(), etc.)
+        else if (trimmedLine.match(/^[A-Za-z0-9"'][^=]*\([^)]*\);?\s*$/) && 
+                 !trimmedLine.startsWith('console.') &&
+                 !trimmedLine.startsWith('function ') &&
+                 !trimmedLine.includes('__logReturn')) {
+          const match = line.match(/^(\s*)([^;\/]+);?\s*(\/\/.*)?$/);
+          if (match) {
+            const indent = match[1];
+            const expr = match[2].trim();
+            const comment = match[3] || '';
+            processedLine = `${indent}(() => { const __r = (${expr}); __logReturn('expression', __r, ${lineNum}); return __r; })(); ${comment}`;
+          }
+        }
+        
+        instrumentedLines.push(`__setLine(${lineNum}); ${processedLine}`);
       }
       
       return instrumentedLines.join('\n');
