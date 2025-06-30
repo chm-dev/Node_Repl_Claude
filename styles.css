@@ -1,0 +1,387 @@
+/* Reset and Base Styles */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    background: #1e1e1e;
+    color: #d4d4d4;
+    overflow: hidden;
+    height: 100vh;
+}
+
+/* App Container */
+.app-container {
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+}
+
+/* Header */
+.header {
+    background: #2d2d30;
+    border-bottom: 1px solid #3e3e42;
+    padding: 10px 20px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.header-left {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+}
+
+.app-title {
+    font-size: 18px;
+    font-weight: 600;
+    color: #ffffff;
+}
+
+.subtitle {
+    font-size: 12px;
+    color: #8c8c8c;
+}
+
+.header-right {
+    display: flex;
+    gap: 10px;
+}
+
+/* Buttons */
+.btn {
+    background: #0e639c;
+    color: white;
+    border: none;
+    padding: 8px 16px;
+    border-radius: 4px;
+    font-size: 14px;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    transition: all 0.2s ease;
+}
+
+.btn:hover {
+    background: #1177bb;
+}
+
+.btn:active {
+    transform: translateY(1px);
+}
+
+.btn-primary {
+    background: #0e639c;
+}
+
+.btn-primary:hover {
+    background: #1177bb;
+}
+
+.btn-secondary {
+    background: #5a5a5a;
+}
+
+.btn-secondary:hover {
+    background: #6a6a6a;
+}
+
+.btn-small {
+    padding: 4px 8px;
+    font-size: 12px;
+}
+
+/* Main Content */
+.main-content {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+/* Panel Styles */
+.editor-panel,
+.output-panel {
+    display: flex;
+    flex-direction: column;
+    background: #1e1e1e;
+}
+
+.editor-panel {
+    flex: 1;
+    border-right: 1px solid #3e3e42;
+}
+
+.output-panel {
+    flex: 1;
+    max-width: 50%;
+}
+
+.panel-header {
+    background: #2d2d30;
+    border-bottom: 1px solid #3e3e42;
+    padding: 8px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.panel-header h3 {
+    font-size: 14px;
+    font-weight: 500;
+    color: #cccccc;
+}
+
+.editor-info {
+    font-size: 12px;
+    color: #8c8c8c;
+}
+
+.output-controls {
+    display: flex;
+    gap: 8px;
+}
+
+/* Editor Container */
+.editor-container {
+    flex: 1;
+    overflow: hidden;
+}
+
+/* Output Container */
+.output-container {
+    flex: 1;
+    overflow-y: auto;
+    padding: 16px;
+    font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+    font-size: 14px;
+    line-height: 1.4;
+}
+
+/* Output Styles */
+.output-item {
+    margin-bottom: 12px;
+    padding: 8px;
+    border-radius: 4px;
+    border-left: 3px solid transparent;
+    transition: background-color 0.2s ease;
+}
+
+.output-item:hover {
+    background-color: rgba(255, 255, 255, 0.05);
+}
+
+.output-item[style*="cursor: pointer"]:hover {
+    background-color: rgba(0, 123, 204, 0.1);
+}
+
+.output-item.result {
+    background: #0e2f1e;
+    border-left-color: #4caf50;
+}
+
+.output-item.error {
+    background: #2f0e0e;
+    border-left-color: #f44336;
+}
+
+.output-item.console-log {
+    background: #1a1a2e;
+    border-left-color: #2196f3;
+}
+
+.output-item.console-warn {
+    background: #2f2f0e;
+    border-left-color: #ff9800;
+}
+
+.output-item.console-error {
+    background: #2f0e0e;
+    border-left-color: #f44336;
+}
+
+.output-item.console-info {
+    background: #0e1f2f;
+    border-left-color: #00bcd4;
+}
+
+.output-header {
+    font-size: 12px;
+    color: #8c8c8c;
+    margin-bottom: 4px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+.output-header .line-number {
+    color: #569cd6;
+    font-weight: 500;
+    margin-left: 8px;
+}
+
+.output-content {
+    color: #d4d4d4;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.output-type {
+    font-size: 11px;
+    color: #6a6a6a;
+    font-style: italic;
+}
+
+/* Status Bar */
+.status-bar {
+    background: #007acc;
+    color: white;
+    padding: 4px 16px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 12px;
+    flex-shrink: 0;
+}
+
+.status-left,
+.status-right {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+}
+
+/* Loading Screen */
+.loading-screen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: #1e1e1e;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    z-index: 1000;
+}
+
+.loading-content {
+    text-align: center;
+    color: #d4d4d4;
+}
+
+.loading-spinner {
+    width: 32px;
+    height: 32px;
+    border: 4px solid #3e3e42;
+    border-top: 4px solid #007acc;
+    border-radius: 50%;
+    animation: spin 1s linear infinite;
+    margin: 0 auto 16px;
+    box-sizing: content-box;
+}
+
+@keyframes spin {
+    0% { transform: rotate(0deg); }
+    100% { transform: rotate(360deg); }
+}
+
+/* Scrollbar Styles */
+::-webkit-scrollbar {
+    width: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: #1e1e1e;
+}
+
+::-webkit-scrollbar-thumb {
+    background: #464647;
+    border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: #5a5a5a;
+}
+
+/* Monaco Editor Customization */
+.monaco-editor {
+    background: #1e1e1e !important;
+}
+
+.monaco-editor .margin {
+    background: #1e1e1e !important;
+}
+
+/* Line highlighting for output clicks */
+.line-highlight {
+    background-color: rgba(255, 255, 0, 0.2) !important;
+}
+
+.line-highlight-glyph {
+    background-color: rgba(255, 255, 0, 0.4) !important;
+}
+
+/* Responsive Design */
+@media (max-width: 768px) {
+    .main-content {
+        flex-direction: column;
+    }
+    
+    .output-panel {
+        max-width: none;
+        max-height: 50%;
+    }
+    
+    .header-left .subtitle {
+        display: none;
+    }
+}
+
+/* Animation for output items */
+.output-item {
+    animation: slideIn 0.3s ease-out;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateY(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* Syntax highlighting for output */
+.output-content .string {
+    color: #ce9178;
+}
+
+.output-content .number {
+    color: #b5cea8;
+}
+
+.output-content .boolean {
+    color: #569cd6;
+}
+
+.output-content .null,
+.output-content .undefined {
+    color: #8c8c8c;
+}
+
+.output-content .function {
+    color: #dcdcaa;
+}
+
+.output-content .object {
+    color: #4ec9b0;
+}
