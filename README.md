@@ -2,6 +2,12 @@
 
 A powerful Electron-based JavaScript REPL (Read-Eval-Print Loop) application that provides a comprehensive JavaScript development environment. This enhanced version includes Node.js modules support, advanced code instrumentation, and precise line tracking for professional JavaScript development.
 
+## 📷 Screenshot
+
+![Enhanced JS REPL Interface](assets/screenshot.png)
+
+*The Enhanced JS REPL interface showing the editor panel on the left and output panel on the right with sample code execution*
+
 ## ✨ Features
 
 ### Core Features
