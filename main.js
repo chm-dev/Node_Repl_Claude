@@ -182,6 +182,11 @@ ipcMain.handle('execute-code', async (event, code) => {
       const lines = code.split('\n');
       const instrumentedLines = [];
       
+      // Track open/close brackets to properly detect multi-line statements
+      let parenDepth = 0;
+      let braceDepth = 0;
+      let bracketDepth = 0;
+      
       for (let i = 0; i < lines.length; i++) {
         const lineNum = i + 1;
         const line = lines[i];
@@ -193,71 +198,109 @@ ipcMain.handle('execute-code', async (event, code) => {
           continue;
         }
         
+        // Count brackets on this line to update depth
+        for (let char of line) {
+          if (char === '(') parenDepth++;
+          else if (char === ')') parenDepth--;
+          else if (char === '{') braceDepth++;
+          else if (char === '}') braceDepth--;
+          else if (char === '[') bracketDepth++;
+          else if (char === ']') bracketDepth--;
+        }
+        
+        // Check if we're in the middle of a multi-line statement
+        // We need to check the depth BEFORE processing this line
+        let wasInMultiLine = false;
+        let tempParenDepth = 0;
+        let tempBraceDepth = 0;
+        let tempBracketDepth = 0;
+        
+        // Calculate what the depth was before this line
+        for (let j = 0; j < i; j++) {
+          for (let char of lines[j]) {
+            if (char === '(') tempParenDepth++;
+            else if (char === ')') tempParenDepth--;
+            else if (char === '{') tempBraceDepth++;
+            else if (char === '}') tempBraceDepth--;
+            else if (char === '[') tempBracketDepth++;
+            else if (char === ']') tempBracketDepth--;
+          }
+        }
+        
+        wasInMultiLine = tempParenDepth > 0 || tempBraceDepth > 0 || tempBracketDepth > 0;
+        
         let processedLine = line;
         
-        // Handle return statements
-        if (trimmedLine.startsWith('return ') && trimmedLine !== 'return;') {
-          const match = line.match(/^(\s*)return\s+([^;\/]+);?\s*(\/\/.*)?$/);
-          if (match) {
-            const indent = match[1];
-            const expr = match[2].trim();
-            const comment = match[3] || '';
-            
-            // Check if expression contains await
-            if (expr.includes('await ')) {
-              processedLine = `${indent}return await (async () => { const __rv = (${expr}); __logReturn('return', __rv, ${lineNum}); return __rv; })(); ${comment}`;
-            } else {
-              processedLine = `${indent}return (() => { const __rv = (${expr}); __logReturn('return', __rv, ${lineNum}); return __rv; })(); ${comment}`;
-            }
-          }
-        }
-        // Handle variable assignments with function calls: const x = func();
-        else if (trimmedLine.match(/^(const|let|var)\s+\w+\s*=\s*/) || trimmedLine.match(/^\w+\s*=\s*/)) {
-          const match = line.match(/^(\s*)(?:(const|let|var)\s+)?(\w+)\s*=\s*([^;\/]+);?\s*(\/\/.*)?$/);
-          if (match) {
-            const indent = match[1];
-            const varType = match[2] || ''; // might be empty for reassignments
-            const varName = match[3];
-            const expr = match[4].trim();
-            const comment = match[5] || '';
-            
-            // Check if expression contains await
-            if (expr.includes('await ')) {
-              if (varType) {
-                processedLine = `${indent}const ${varName} = await (async () => { const __r = (${expr}); __logReturn('${varName}', __r, ${lineNum}); return __r; })(); ${comment}`;
+        // Only process lines that are not continuation lines
+        if (!wasInMultiLine) {
+          // Handle return statements
+          if (trimmedLine.startsWith('return ') && trimmedLine !== 'return;') {
+            const match = line.match(/^(\s*)return\s+([^;\/]+);?\s*(\/\/.*)?$/);
+            if (match) {
+              const indent = match[1];
+              const expr = match[2].trim();
+              const comment = match[3] || '';
+              
+              // Check if expression contains await
+              if (expr.includes('await ')) {
+                processedLine = `${indent}return await (async () => { const __rv = (${expr}); __logReturn('return', __rv, ${lineNum}); return __rv; })(); ${comment}`;
               } else {
-                processedLine = `${indent}${varName} = await (async () => { const __r = (${expr}); __logReturn('${varName}', __r, ${lineNum}); return __r; })(); ${comment}`;
-              }
-            } else {
-              if (varType) {
-                processedLine = `${indent}${varType} ${varName} = (() => { const __r = (${expr}); __logReturn('${varName}', __r, ${lineNum}); return __r; })(); ${comment}`;
-              } else {
-                processedLine = `${indent}${varName} = (() => { const __r = (${expr}); __logReturn('${varName}', __r, ${lineNum}); return __r; })(); ${comment}`;
+                processedLine = `${indent}return (() => { const __rv = (${expr}); __logReturn('return', __rv, ${lineNum}); return __rv; })(); ${comment}`;
               }
             }
           }
-        }
-        // Handle standalone function calls (like Math.max, "str".method(), etc.)
-        else if (trimmedLine.match(/^[A-Za-z0-9"'][^=]*\([^)]*\);?\s*$/) && 
-                 !trimmedLine.startsWith('console.') &&
-                 !trimmedLine.startsWith('function ') &&
-                 !trimmedLine.includes('__logReturn')) {
-          const match = line.match(/^(\s*)([^;\/]+);?\s*(\/\/.*)?$/);
-          if (match) {
-            const indent = match[1];
-            const expr = match[2].trim();
-            const comment = match[3] || '';
-            
-            // Check if expression contains await
-            if (expr.includes('await ')) {
-              processedLine = `${indent}await (async () => { const __r = (${expr}); __logReturn('expression', __r, ${lineNum}); return __r; })(); ${comment}`;
-            } else {
-              processedLine = `${indent}(() => { const __r = (${expr}); __logReturn('expression', __r, ${lineNum}); return __r; })(); ${comment}`;
+          // Handle variable assignments with function calls: const x = func();
+          else if (trimmedLine.match(/^(const|let|var)\s+\w+\s*=\s*/) || trimmedLine.match(/^\w+\s*=\s*/)) {
+            const match = line.match(/^(\s*)(?:(const|let|var)\s+)?(\w+)\s*=\s*([^;\/]+);?\s*(\/\/.*)?$/);
+            if (match) {
+              const indent = match[1];
+              const varType = match[2] || ''; // might be empty for reassignments
+              const varName = match[3];
+              const expr = match[4].trim();
+              const comment = match[5] || '';
+              
+              // Check if expression contains await
+              if (expr.includes('await ')) {
+                if (varType) {
+                  processedLine = `${indent}const ${varName} = await (async () => { const __r = (${expr}); __logReturn('${varName}', __r, ${lineNum}); return __r; })(); ${comment}`;
+                } else {
+                  processedLine = `${indent}${varName} = await (async () => { const __r = (${expr}); __logReturn('${varName}', __r, ${lineNum}); return __r; })(); ${comment}`;
+                }
+              } else {
+                if (varType) {
+                  processedLine = `${indent}${varType} ${varName} = (() => { const __r = (${expr}); __logReturn('${varName}', __r, ${lineNum}); return __r; })(); ${comment}`;
+                } else {
+                  processedLine = `${indent}${varName} = (() => { const __r = (${expr}); __logReturn('${varName}', __r, ${lineNum}); return __r; })(); ${comment}`;
+                }
+              }
             }
           }
+          // Handle standalone function calls (like Math.max, "str".method(), etc.)
+          else if (trimmedLine.match(/^[A-Za-z0-9"'][^=]*\([^)]*\);?\s*$/) && 
+                   !trimmedLine.startsWith('console.') &&
+                   !trimmedLine.startsWith('function ') &&
+                   !trimmedLine.includes('__logReturn')) {
+            const match = line.match(/^(\s*)([^;\/]+);?\s*(\/\/.*)?$/);
+            if (match) {
+              const indent = match[1];
+              const expr = match[2].trim();
+              const comment = match[3] || '';
+              
+              // Check if expression contains await
+              if (expr.includes('await ')) {
+                processedLine = `${indent}await (async () => { const __r = (${expr}); __logReturn('expression', __r, ${lineNum}); return __r; })(); ${comment}`;
+              } else {
+                processedLine = `${indent}(() => { const __r = (${expr}); __logReturn('expression', __r, ${lineNum}); return __r; })(); ${comment}`;
+              }
+            }
+          }
+          
+          // Add line tracking only to statement start lines
+          instrumentedLines.push(`__setLine(${lineNum}); ${processedLine}`);
+        } else {
+          // For continuation lines, just add the line without instrumentation
+          instrumentedLines.push(processedLine);
         }
-        
-        instrumentedLines.push(`__setLine(${lineNum}); ${processedLine}`);
       }
       
       return instrumentedLines.join('\n');
@@ -268,6 +311,9 @@ ipcMain.handle('execute-code', async (event, code) => {
 
     // Instrument the code for line tracking
     const instrumentedCode = instrumentCode(code);
+    
+    // Debug: log the instrumented code
+    console.log('Instrumented code:', instrumentedCode);
 
     // For async support, we need to handle promises properly
     const wrappedCode = `
