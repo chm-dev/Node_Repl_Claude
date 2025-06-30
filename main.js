@@ -2,6 +2,9 @@ const { app, BrowserWindow, ipcMain, Menu } = require('electron');
 const path = require('path');
 const vm = require('vm');
 
+// Global persistent context for REPL
+let globalContext = null;
+
 let mainWindow;
 
 function createWindow() {
@@ -108,6 +111,95 @@ function createMenu() {
   Menu.setApplicationMenu(menu);
 }
 
+// Initialize global persistent context
+function initializeGlobalContext() {
+  const Module = require('module');
+  const fs = require('fs');
+  
+  // Function to create a simplified Node.js-like module system
+  const createNodeModules = () => {
+    const modules = new Map();
+    
+    // Add core modules
+    modules.set('fs', fs);
+    modules.set('path', path);
+    modules.set('util', require('util'));
+    modules.set('crypto', require('crypto'));
+    modules.set('os', require('os'));
+    
+    return modules;
+  };
+
+  // Function to create a custom require function
+  const createRequire = (nodeModules) => {
+    return function customRequire(moduleName) {
+      if (nodeModules.has(moduleName)) {
+        return nodeModules.get(moduleName);
+      }
+      
+      try {
+        // Try to require the module normally for external packages
+        return require(moduleName);
+      } catch (error) {
+        throw new Error(`Module '${moduleName}' not found`);
+      }
+    };
+  };
+
+  const nodeModules = createNodeModules();
+  const requireFunction = createRequire(nodeModules);
+
+  // Create the persistent sandbox
+  const sandbox = {
+    console: {}, // Will be filled in during execution
+    __setLine: null, // Will be set during execution
+    __logReturn: null, // Will be set during execution
+    setTimeout: (callback, delay) => setTimeout(callback, Math.min(delay, 5000)),
+    setInterval: (callback, delay) => setInterval(callback, Math.max(delay, 100)),
+    clearTimeout,
+    clearInterval,
+    Promise,
+    Date,
+    Math,
+    JSON,
+    Object,
+    Array,
+    String,
+    Number,
+    Boolean,
+    RegExp,
+    Error,
+    TypeError,
+    ReferenceError,
+    SyntaxError,
+    Buffer,
+    process: {
+      versions: process.versions,
+      platform: process.platform,
+      arch: process.arch,
+      env: { NODE_ENV: 'development' }
+    },
+    require: requireFunction,
+    module: { exports: {} },
+    exports: {},
+    global: undefined,
+    globalThis: undefined
+  };
+
+  // Set globalThis and global to reference the sandbox itself
+  sandbox.global = sandbox;
+  sandbox.globalThis = sandbox;
+
+  globalContext = vm.createContext(sandbox);
+  return globalContext;
+}
+
+// Function to reset the global context (clear all variables)
+function resetGlobalContext() {
+  globalContext = null;
+  initializeGlobalContext();
+}
+
 // Handle code execution
 ipcMain.handle('execute-code', async (event, code) => {
   try {
@@ -141,186 +233,20 @@ ipcMain.handle('execute-code', async (event, code) => {
       }
     };
 
-    // Create Node.js module mocks for browser-like environment
-    const createNodeModules = () => {
-      const nodeModules = {};
-      
-      // Mock OS module
-      nodeModules.os = {
-        platform: () => process.platform,
-        arch: () => process.arch,
-        cpus: () => require('os').cpus(),
-        totalmem: () => require('os').totalmem(),
-        freemem: () => require('os').freemem(),
-        homedir: () => require('os').homedir(),
-        hostname: () => require('os').hostname(),
-        type: () => require('os').type(),
-        release: () => require('os').release(),
-        uptime: () => require('os').uptime(),
-        loadavg: () => require('os').loadavg(),
-        networkInterfaces: () => require('os').networkInterfaces(),
-        userInfo: () => require('os').userInfo(),
-        tmpdir: () => require('os').tmpdir(),
-        endianness: () => require('os').endianness(),
-        EOL: require('os').EOL
-      };
-      
-      // Mock PATH module
-      nodeModules.path = {
-        join: (...args) => require('path').join(...args),
-        resolve: (...args) => require('path').resolve(...args),
-        relative: (from, to) => require('path').relative(from, to),
-        dirname: (p) => require('path').dirname(p),
-        basename: (p, ext) => require('path').basename(p, ext),
-        extname: (p) => require('path').extname(p),
-        parse: (p) => require('path').parse(p),
-        format: (obj) => require('path').format(obj),
-        normalize: (p) => require('path').normalize(p),
-        isAbsolute: (p) => require('path').isAbsolute(p),
-        sep: require('path').sep,
-        delimiter: require('path').delimiter,
-        posix: require('path').posix,
-        win32: require('path').win32
-      };
-      
-      // Mock CRYPTO module
-      nodeModules.crypto = {
-        randomBytes: (size) => require('crypto').randomBytes(size),
-        randomUUID: () => require('crypto').randomUUID(),
-        createHash: (algorithm) => require('crypto').createHash(algorithm),
-        createHmac: (algorithm, key) => require('crypto').createHmac(algorithm, key),
-        pbkdf2Sync: (password, salt, iterations, keylen, digest) => 
-          require('crypto').pbkdf2Sync(password, salt, iterations, keylen, digest),
-        scryptSync: (password, salt, keylen, options) => 
-          require('crypto').scryptSync(password, salt, keylen, options),
-        timingSafeEqual: (a, b) => require('crypto').timingSafeEqual(a, b)
-      };
-      
-      // Mock FS module (limited safe operations)
-      nodeModules.fs = {
-        existsSync: (path) => {
-          try {
-            return require('fs').existsSync(path);
-          } catch (error) {
-            return false;
-          }
-        },
-        statSync: (path) => {
-          try {
-            return require('fs').statSync(path);
-          } catch (error) {
-            throw new Error('File not found or access denied');
-          }
-        },
-        constants: require('fs').constants
-      };
-      
-      // Mock UTIL module
-      nodeModules.util = {
-        format: (...args) => require('util').format(...args),
-        inspect: (obj, options) => require('util').inspect(obj, options),
-        isArray: Array.isArray,
-        isDate: (obj) => obj instanceof Date,
-        isError: (obj) => obj instanceof Error,
-        isFunction: (obj) => typeof obj === 'function',
-        isNull: (obj) => obj === null,
-        isUndefined: (obj) => obj === undefined,
-        types: require('util').types
-      };
-      
-      return nodeModules;
-    };
+    // Initialize global context if it doesn't exist
+    if (!globalContext) {
+      initializeGlobalContext();
+    }
 
-    // Create require function for Node modules
-    const createRequire = (nodeModules) => {
-      return (moduleName) => {
-        // Try to get real Node.js module first
-        try {
-          switch (moduleName) {
-            case 'os':
-              return require('os');
-            case 'path':
-              return require('path');
-            case 'crypto':
-              return require('crypto');
-            case 'util':
-              return require('util');
-            case 'fs':
-              return require('fs');
-            case 'url':
-              return require('url');
-            case 'querystring':
-              return require('querystring');
-            default:
-              // For unknown modules, throw an error like Node.js would
-              throw new Error(`Cannot find module '${moduleName}'`);
-          }
-        } catch (error) {
-          // If real module fails, try mock version
-          if (nodeModules[moduleName]) {
-            return nodeModules[moduleName];
-          }
-          // If no mock available, re-throw the error
-          throw error;
-        }
-      };
+    // Update the context with current execution-specific functions
+    globalContext.console = {
+      log: createConsoleMethod('log'),
+      error: createConsoleMethod('error'),
+      warn: createConsoleMethod('warn'),
+      info: createConsoleMethod('info')
     };
-
-    // Create Node modules and require function
-    const nodeModules = createNodeModules();
-    const requireFunction = createRequire(nodeModules);
-
-    // Create a new context for code execution
-    const sandbox = {
-      console: {
-        log: createConsoleMethod('log'),
-        error: createConsoleMethod('error'),
-        warn: createConsoleMethod('warn'),
-        info: createConsoleMethod('info')
-      },
-      __setLine: setCurrentLine, // Internal line tracking function
-      __logReturn: logFunctionReturn, // Internal function return logging
-      setTimeout: (callback, delay) => setTimeout(callback, Math.min(delay, 5000)), // Max 5 second timeout
-      setInterval: (callback, delay) => setInterval(callback, Math.max(delay, 100)), // Min 100ms interval
-      clearTimeout,
-      clearInterval,
-      Promise,
-      Date,
-      Math,
-      JSON,
-      parseInt,
-      parseFloat,
-      isNaN,
-      isFinite,
-      Array,
-      Object,
-      String,
-      Number,
-      Boolean,
-      RegExp,
-      Error,
-      TypeError,
-      ReferenceError,
-      SyntaxError,
-      // Add Node.js globals
-      process: {
-        version: process.version,
-        versions: process.versions,
-        platform: process.platform,
-        arch: process.arch,
-        env: { NODE_ENV: 'development' }, // Limited env access
-        argv: process.argv,
-        pid: process.pid,
-        uptime: () => process.uptime(),
-        hrtime: process.hrtime,
-        nextTick: process.nextTick
-      },
-      Buffer: Buffer,
-      global: {},
-      require: requireFunction,
-      // Add some utility functions
-      fetch: require('node-fetch') // For async operations
-    };
+    globalContext.__setLine = setCurrentLine;
+    globalContext.__logReturn = logFunctionReturn;
 
     // Instrument the code to add line tracking
     const instrumentCode = (code) => {
@@ -438,47 +364,85 @@ ipcMain.handle('execute-code', async (event, code) => {
       const trimmedStatement = statement.trim();
       let processedStatement = statement;
       
+      // Helper function to safely extract expression and comment
+      function parseStatementParts(stmt, regex) {
+        const match = stmt.match(regex);
+        if (match) {
+          const parts = {
+            indent: match[1] || '',
+            varType: match[2] || '',
+            varName: match[3] || '',
+            expr: '',
+            comment: ''
+          };
+          
+          // Find the last part which should be the expression + potential comment
+          const lastPart = match[match.length - 1];
+          
+          // Check if there's a comment at the end (but not inside a string)
+          let inQuote = false;
+          let quoteChar = '';
+          let commentIndex = -1;
+          
+          for (let i = 0; i < lastPart.length - 1; i++) {
+            const char = lastPart[i];
+            const nextChar = lastPart[i + 1];
+            
+            if (!inQuote && (char === '"' || char === "'" || char === '`')) {
+              inQuote = true;
+              quoteChar = char;
+            } else if (inQuote && char === quoteChar && lastPart[i - 1] !== '\\') {
+              inQuote = false;
+              quoteChar = '';
+            } else if (!inQuote && char === '/' && nextChar === '/') {
+              commentIndex = i;
+              break;
+            }
+          }
+          
+          if (commentIndex >= 0) {
+            parts.expr = lastPart.substring(0, commentIndex).trim().replace(/;$/, '');
+            parts.comment = lastPart.substring(commentIndex);
+          } else {
+            parts.expr = lastPart.trim().replace(/;$/, '');
+          }
+          
+          return parts;
+        }
+        return null;
+      }
+      
       // Handle return statements
       if (trimmedStatement.startsWith('return ') && trimmedStatement !== 'return;') {
-        const match = statement.match(/^(\s*)return\s+([^;\/]+);?\s*(\/\/.*)?$/s);
-        if (match) {
-          const indent = match[1];
-          const expr = match[2].trim();
-          const comment = match[3] || '';
-          
-          if (expr.includes('await ')) {
-            processedStatement = `${indent}return await (async () => { const __rv = (${expr}); __logReturn('return', __rv, ${lineNum}); return __rv; })(); ${comment}`;
+        const parts = parseStatementParts(statement, /^(\s*)return\s+(.+)$/s);
+        if (parts) {
+          if (parts.expr.includes('await ')) {
+            processedStatement = `${parts.indent}return await (async () => { const __rv = (${parts.expr}); __logReturn('return', __rv, ${lineNum}); return __rv; })(); ${parts.comment}`;
           } else {
-            processedStatement = `${indent}return (() => { const __rv = (${expr}); __logReturn('return', __rv, ${lineNum}); return __rv; })(); ${comment}`;
+            processedStatement = `${parts.indent}return (() => { const __rv = (${parts.expr}); __logReturn('return', __rv, ${lineNum}); return __rv; })(); ${parts.comment}`;
           }
         }
       }
       // Handle variable assignments
       else if (trimmedStatement.match(/^(const|let|var)\s+\w+\s*=\s*/) || trimmedStatement.match(/^\w+\s*=\s*/)) {
-        const match = statement.match(/^(\s*)(?:(const|let|var)\s+)?(\w+)\s*=\s*([^;\/]+);?\s*(\/\/.*)?$/s);
-        if (match) {
-          const indent = match[1];
-          const varType = match[2] || '';
-          const varName = match[3];
-          const expr = match[4].trim();
-          const comment = match[5] || '';
-          
-          const isRequireStatement = expr.match(/^require\s*\(/);
+        const parts = parseStatementParts(statement, /^(\s*)(?:(const|let|var)\s+)?(\w+)\s*=\s*(.+)$/s);
+        if (parts) {
+          const isRequireStatement = parts.expr.match(/^require\s*\(/);
           
           if (isRequireStatement) {
             processedStatement = statement;
           } else {
-            if (expr.includes('await ')) {
-              if (varType) {
-                processedStatement = `${indent}const ${varName} = await (async () => { const __r = (${expr}); __logReturn('${varName}', __r, ${lineNum}); return __r; })(); ${comment}`;
+            if (parts.expr.includes('await ')) {
+              if (parts.varType) {
+                processedStatement = `${parts.indent}const ${parts.varName} = await (async () => { const __r = (${parts.expr}); __logReturn('${parts.varName}', __r, ${lineNum}); return __r; })(); ${parts.comment}`;
               } else {
-                processedStatement = `${indent}${varName} = await (async () => { const __r = (${expr}); __logReturn('${varName}', __r, ${lineNum}); return __r; })(); ${comment}`;
+                processedStatement = `${parts.indent}${parts.varName} = await (async () => { const __r = (${parts.expr}); __logReturn('${parts.varName}', __r, ${lineNum}); return __r; })(); ${parts.comment}`;
               }
             } else {
-              if (varType) {
-                processedStatement = `${indent}${varType} ${varName} = (() => { const __r = (${expr}); __logReturn('${varName}', __r, ${lineNum}); return __r; })(); ${comment}`;
+              if (parts.varType) {
+                processedStatement = `${parts.indent}${parts.varType} ${parts.varName} = (() => { const __r = (${parts.expr}); __logReturn('${parts.varName}', __r, ${lineNum}); return __r; })(); ${parts.comment}`;
               } else {
-                processedStatement = `${indent}${varName} = (() => { const __r = (${expr}); __logReturn('${varName}', __r, ${lineNum}); return __r; })(); ${comment}`;
+                processedStatement = `${parts.indent}${parts.varName} = (() => { const __r = (${parts.expr}); __logReturn('${parts.varName}', __r, ${lineNum}); return __r; })(); ${parts.comment}`;
               }
             }
           }
@@ -489,21 +453,18 @@ ipcMain.handle('execute-code', async (event, code) => {
                !trimmedStatement.startsWith('console.') &&
                !trimmedStatement.startsWith('function ') &&
                !trimmedStatement.includes('__logReturn')) {
-        const match = statement.match(/^(\s*)([^;\/]+);?\s*(\/\/.*)?$/s);
-        if (match) {
-          const indent = match[1];
-          const expr = match[2].trim();
-          const comment = match[3] || '';
-          
-          const isRequireStatement = expr.match(/^require\s*\(/);
+        const parts = parseStatementParts(statement, /^(\s*)(.+)$/s);
+        if (parts) {
+          const isRequireStatement = parts.expr.match(/^require\s*\(/);
           
           if (isRequireStatement) {
             processedStatement = statement;
           } else {
-            if (expr.includes('await ')) {
-              processedStatement = `${indent}await (async () => { const __r = (${expr}); __logReturn('expression', __r, ${lineNum}); return __r; })(); ${comment}`;
+            // Execute directly in global context without wrapping in IIFE
+            if (parts.expr.includes('await ')) {
+              processedStatement = `${parts.indent}{ const __r = await (${parts.expr}); __logReturn('expression', __r, ${lineNum}); } ${parts.comment}`;
             } else {
-              processedStatement = `${indent}(() => { const __r = (${expr}); __logReturn('expression', __r, ${lineNum}); return __r; })(); ${comment}`;
+              processedStatement = `${parts.indent}{ const __r = (${parts.expr}); __logReturn('expression', __r, ${lineNum}); } ${parts.comment}`;
             }
           }
         }
@@ -512,8 +473,7 @@ ipcMain.handle('execute-code', async (event, code) => {
       return processedStatement;
     }
 
-    // Create VM context
-    const context = vm.createContext(sandbox);
+    // Use the persistent global context
 
     // Instrument the code for line tracking
     const instrumentedCode = instrumentCode(code);
@@ -521,20 +481,89 @@ ipcMain.handle('execute-code', async (event, code) => {
     // Debug: log the instrumented code
     console.log('Instrumented code:', instrumentedCode);
 
-    // For async support, we need to handle promises properly
-    const wrappedCode = `
-(async () => {
-${instrumentedCode}
-})()
-    `;
+    // Check if the code contains function declarations that need to be in global scope
+    const lines = code.split('\n');
+    const functionDeclarations = [];
+    const otherCode = [];
+    
+    let currentBlock = [];
+    let inFunction = false;
+    let braceDepth = 0;
+    
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i];
+      const trimmed = line.trim();
+      
+      // Check if this line starts a function declaration
+      if (trimmed.match(/^(async\s+)?function\s+\w+/) || trimmed.match(/^(const|let|var)\s+\w+\s*=\s*(async\s+)?\s*function/)) {
+        if (currentBlock.length > 0) {
+          otherCode.push(...currentBlock);
+          currentBlock = [];
+        }
+        inFunction = true;
+        currentBlock.push(line);
+        
+        // Count braces to know when function ends
+        for (const char of line) {
+          if (char === '{') braceDepth++;
+          else if (char === '}') braceDepth--;
+        }
+      } else if (inFunction) {
+        currentBlock.push(line);
+        
+        // Count braces to know when function ends
+        for (const char of line) {
+          if (char === '{') braceDepth++;
+          else if (char === '}') braceDepth--;
+        }
+        
+        // If we've closed all braces, the function is complete
+        if (braceDepth === 0) {
+          functionDeclarations.push(...currentBlock);
+          currentBlock = [];
+          inFunction = false;
+        }
+      } else {
+        currentBlock.push(line);
+      }
+    }
+    
+    // Add any remaining code
+    if (currentBlock.length > 0) {
+      otherCode.push(...currentBlock);
+    }
 
-    // Execute the code
-    const result = await vm.runInContext(wrappedCode, context, {
-      timeout: 5000, // 5 second timeout
-      displayErrors: true,
-      filename: 'user-code.js', // This helps with stack traces
-      lineOffset: 0 // Start from line 1
-    });
+    let result;
+    
+    // First, execute function declarations directly in global context
+    if (functionDeclarations.length > 0) {
+      const functionCode = functionDeclarations.join('\n');
+      const instrumentedFunctionCode = instrumentCode(functionCode);
+      console.log('Executing function declarations:', instrumentedFunctionCode);
+      
+      await vm.runInContext(instrumentedFunctionCode, globalContext, {
+        timeout: 5000,
+        displayErrors: true,
+        filename: 'user-code.js'
+      });
+    }
+    
+    // Then execute other code (which may reference the functions)
+    if (otherCode.length > 0) {
+      const otherCodeStr = otherCode.join('\n').trim();
+      if (otherCodeStr) {
+        const instrumentedOtherCode = instrumentCode(otherCodeStr);
+        console.log('Executing other code:', instrumentedOtherCode);
+        
+        // Execute directly in global context - no need to wrap in async IIFE
+        // since the global context can handle promises and async operations
+        result = await vm.runInContext(instrumentedOtherCode, globalContext, {
+          timeout: 5000,
+          displayErrors: true,
+          filename: 'user-code.js'
+        });
+      }
+    }
     
     return {
       success: true,
@@ -558,6 +587,12 @@ ${instrumentedCode}
       lineNumber: lineNumber
     };
   }
+});
+
+// Handle context reset
+ipcMain.handle('reset-context', async () => {
+  resetGlobalContext();
+  return { success: true };
 });
 
 // App event handlers
